@@ -1,6 +1,8 @@
 const express = require('express');
+const path = require('path');
 const axios = require('axios');
 const rateLimit = require('express-rate-limit');
+const xml2js = require('xml2js'); // Added for parsing XML responses
 require('dotenv').config();
 
 const app = express();
@@ -38,23 +40,40 @@ const validateInput = (input) => {
   return 'unknown';
 };
 
-// Service Configuration
+// Service Configuration (Metadefender added for domain and hash)
 const serviceEndpoints = {
-  ip: ['Virustotal', 'AbuseIPDB', 'IPQualityScore', 'APIVoid', 'XForce'],
-  domain: ['Virustotal', 'WhoisXML', 'MetaDataReport', 'APIVoid', 'XForce'],
-  hash: ['Virustotal', 'MetaDataReport', 'XForce']
+  ip: ['Virustotal', 'AbuseIPDB', 'IPQualityScore', 'APIVoid', 'VPNAPI', 'Hybrid-Analysis', 'Metadefender'],
+  domain: ['Virustotal', 'WhoisXML', 'Hybrid-Analysis', 'Metadefender', 'Ismalicious'],
+  hash: ['Virustotal', 'Hybrid-Analysis', 'Metadefender']
 };
 
 // API Service Handlers
 const apiServices = {
-  Virustotal: async (input) => {
+  Virustotal: async (input, type) => {
     try {
-      const response = await axios.get(
-        `https://www.virustotal.com/api/v3/search?query=${encodeURIComponent(input)}`,
-        { headers: { 'x-apikey': process.env.VT_API_KEY } }
-      );
-      const data = response.data.data[0]?.attributes?.last_analysis_stats;
-      return data ? `${data.malicious}/${data.harmless + data.malicious} detections` : 'No results';
+      let stats;
+      if (type === 'hash') {
+        // For file hash, use the file lookup endpoint
+        const response = await axios.get(
+          `https://www.virustotal.com/api/v3/files/${input}`,
+          { headers: { 'x-apikey': process.env.VT_API_KEY } }
+        );
+        stats = response.data.data.attributes.last_analysis_stats;
+        if (!stats) return 'No results';
+        // Sum all keys: harmless, malicious, suspicious, undetected, timeout
+        const total = Object.values(stats).reduce((acc, val) => acc + val, 0);
+        return `${stats.malicious}/${total} detections`;
+      } else {
+        // For IP and domain, use the search endpoint
+        const response = await axios.get(
+          `https://www.virustotal.com/api/v3/search?query=${encodeURIComponent(input)}`,
+          { headers: { 'x-apikey': process.env.VT_API_KEY } }
+        );
+        stats = response.data.data[0]?.attributes?.last_analysis_stats;
+        if (!stats) return 'No results';
+        const total = stats.harmless + stats.malicious;
+        return `${stats.malicious}/${total} detections`;
+      }
     } catch (error) {
       console.error('Virustotal Error:', error.message);
       return 'Service unavailable';
@@ -88,24 +107,16 @@ const apiServices = {
 
   WhoisXML: async (input) => {
     try {
-      const response = await axios.get(
-        `https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey=${process.env.WHOISXML_KEY}&domainName=${input}&outputFormat=JSON`
-      );
-      return `Registered: ${response.data.WhoisRecord?.createdDate?.slice(0, 10) || 'Unknown'}`;
+      // Call the Whois service with XML output
+      const url = `https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey=${process.env.WHOISXML_KEY}&domainName=${input}&outputFormat=XML`;
+      const response = await axios.get(url);
+      const parser = new xml2js.Parser();
+      const result = await parser.parseStringPromise(response.data);
+      // Extract createdDate from the parsed XML
+      const createdDate = result.WhoisRecord?.createdDate?.[0];
+      return `Registered: ${createdDate || 'Unknown'}`;
     } catch (error) {
       console.error('WhoisXML Error:', error.message);
-      return 'Service unavailable';
-    }
-  },
-
-  MetaDataReport: async (input) => {
-    try {
-      const response = await axios.get(
-        `https://api.metadatareport.com/v1/report?apikey=${process.env.METADATA_KEY}&input=${input}`
-      );
-      return `Risk Level: ${response.data.risk_level || 'Unknown'}`;
-    } catch (error) {
-      console.error('MetaDataReport Error:', error.message);
       return 'Service unavailable';
     }
   },
@@ -123,43 +134,127 @@ const apiServices = {
     }
   },
 
-  XForce: async (input, type) => {
+  VPNAPI: async (input) => {
     try {
-      if (!process.env.XFORCE_KEY || !process.env.XFORCE_PASS) {
-        throw new Error('X-Force credentials missing');
-      }
-      
-      const auth = Buffer.from(`${process.env.XFORCE_KEY}:${process.env.XFORCE_PASS}`).toString('base64');
-      let endpoint;
-      
-      switch(type) {
-        case 'ip': endpoint = `ipr/${input}`; break;
-        case 'domain': endpoint = `url/${input}`; break;
-        case 'hash': endpoint = `malware/${input}`; break;
-        default: return 'Unsupported type';
-      }
-
       const response = await axios.get(
-        `https://api.xforce.ibmcloud.com/${endpoint}`,
-        { 
-          headers: { 
-            Authorization: `Basic ${auth}`,
-            'Accept': 'application/json'
-          },
-          validateStatus: () => true
+        `https://vpnapi.io/api/${input}?key=${process.env.VPNAPI_KEY}`
+      );
+      const security = response.data.security;
+      return {
+        vpn: security.vpn,
+        proxy: security.proxy,
+        tor: security.tor,
+        relay: security.relay
+      };
+    } catch (error) {
+      console.error('VPNAPI Error:', error.message);
+      return 'Service unavailable';
+    }
+  },
+
+  // Hybrid-Analysis handler updated to support hash and non-hash inputs.
+  "Hybrid-Analysis": async (input, type) => {
+    try {
+      if (type === 'hash') {
+        // Use the overview endpoint for hash lookups
+        const response = await axios.get(
+          `https://www.hybrid-analysis.com/api/v2/overview/${input}`,
+          {
+            headers: {
+              'User-Agent': 'Falcon Sandbox',
+              'api-key': process.env.HYBRID_ANALYSIS_KEY,
+              'accept': 'application/json'
+            },
+            validateStatus: (status) => status >= 200 && status < 500
+          }
+        );
+        if (response.status === 404) {
+          return { verdict: "not found" };
+        }
+        const verdict = response.data.verdict || "unknown";
+        return { verdict };
+      } else {
+        // For ip and domain, use the search/terms endpoint
+        const response = await axios.get(
+          `https://www.hybrid-analysis.com/api/v2/search/terms?query=${encodeURIComponent(input)}`,
+          {
+            headers: {
+              'User-Agent': 'Falcon Sandbox',
+              'api-key': process.env.HYBRID_ANALYSIS_KEY,
+              'accept': 'application/json'
+            },
+            validateStatus: (status) => status >= 200 && status < 500
+          }
+        );
+        if (response.status === 404) {
+          return { verdict: "not found" };
+        }
+        if (response.data && Array.isArray(response.data) && response.data.length > 0) {
+          const verdict = response.data[0].verdict || "unknown";
+          return { verdict };
+        }
+        return { verdict: "unknown" };
+      }
+    } catch (error) {
+      console.error('Hybrid-Analysis Error:', error.message);
+      return 'Service unavailable';
+    }
+  },
+
+  // Metadefender handler updated for hash, domain, and IP.
+  Metadefender: async (input, type) => {
+    try {
+      let url;
+      if (type === 'ip') {
+        url = `https://api.metadefender.com/v4/ip/${input}`;
+      } else if (type === 'hash') {
+        url = `https://api.metadefender.com/v4/hash/${input}`;
+      } else if (type === 'domain') {
+        url = `https://api.metadefender.com/v4/domain/${input}`;
+      } else {
+        return 'Unsupported type';
+      }
+      const response = await axios.get(url, {
+        headers: {
+          'apikey': process.env.METADEFENDER_KEY,
+          'accept': 'application/json'
+        }
+      });
+      if (type === 'ip') {
+        const detected_by = response.data.lookup_results?.detected_by;
+        return { detected_by };
+      } else if (type === 'hash') {
+        const { threat_name, malware_type, malware_family, total_detected_avs } = response.data;
+        return { threat_name, malware_type, malware_family, total_detected_avs };
+      } else if (type === 'domain') {
+        const detected_by = response.data.lookup_results?.detected_by;
+        return { detected_by };
+      }
+    } catch (error) {
+      console.error('Metadefender Error:', error.message);
+      return 'Service unavailable';
+    }
+  },
+
+  // New Ismalicious handler for domain queries.
+  Ismalicious: async (input, type) => {
+    try {
+      if (type !== 'domain') {
+        return 'Unsupported type';
+      }
+      const response = await axios.get(
+        `https://ismalicious.com/api/check/reputation?query=${input}`,
+        {
+          headers: {
+            'X-API-KEY': process.env.ISMALICIOUS_KEY,
+            'accept': 'application/json'
+          }
         }
       );
-
-      if (response.status === 401) {
-        console.error('X-Force Authentication Failed - Verify API Credentials');
-        return 'Authentication failed';
-      }
-
-      return type === 'hash' 
-        ? `Family: ${response.data.malware?.family?.join(', ') || 'Unknown'}`
-        : `Score: ${response.data.result?.score || 'Unknown'}`;
+      const reputation = response.data.reputation;
+      return reputation;
     } catch (error) {
-      console.error('X-Force Error:', error.message);
+      console.error('Ismalicious Error:', error.message);
       return 'Service unavailable';
     }
   }
@@ -207,6 +302,14 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString()
   });
+});
+
+// Serve static files from the 'public' directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Default route to serve index.html
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
