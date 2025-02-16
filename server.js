@@ -42,7 +42,7 @@ const validateInput = (input) => {
 
 // Service Configuration (Metadefender added for domain and hash)
 const serviceEndpoints = {
-  ip: ['Virustotal', 'AbuseIPDB', 'IPQualityScore', 'APIVoid', 'VPNAPI', 'Hybrid-Analysis', 'Metadefender'],
+  ip: ['Virustotal', 'AbuseIPDB', 'APIVoid', 'VPNAPI', 'Hybrid-Analysis', 'Metadefender'],
   domain: ['Virustotal', 'WhoisXML', 'Hybrid-Analysis', 'Metadefender', 'Ismalicious'],
   hash: ['Virustotal', 'Hybrid-Analysis', 'Metadefender']
 };
