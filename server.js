@@ -51,32 +51,38 @@ const serviceEndpoints = {
 const apiServices = {
   Virustotal: async (input, type) => {
     try {
-      let stats;
       if (type === 'hash') {
-        // For file hash, use the file lookup endpoint
+        // Query VirusTotal for file hash details
         const response = await axios.get(
           `https://www.virustotal.com/api/v3/files/${input}`,
           { headers: { 'x-apikey': process.env.VT_API_KEY } }
         );
-        stats = response.data.data.attributes.last_analysis_stats;
+
+        const stats = response.data.data.attributes.last_analysis_stats;
         if (!stats) return 'No results';
-        // Sum all keys: harmless, malicious, suspicious, undetected, timeout
+
+        // Total detection count
         const total = Object.values(stats).reduce((acc, val) => acc + val, 0);
-        return `${stats.malicious}/${total} detections`;
+        // Extract meaningful file name if available
+        const fileName = response.data.data.attributes.meaningful_name || 'UnknownName';
+
+        return `Virustotal: ${stats.malicious}/${total} detections | ${fileName}`;
       } else {
-        // For IP and domain, use the search endpoint
+        // Query VirusTotal for IP/Domain details
         const response = await axios.get(
           `https://www.virustotal.com/api/v3/search?query=${encodeURIComponent(input)}`,
           { headers: { 'x-apikey': process.env.VT_API_KEY } }
         );
-        stats = response.data.data[0]?.attributes?.last_analysis_stats;
+
+        const stats = response.data.data[0]?.attributes?.last_analysis_stats;
         if (!stats) return 'No results';
+
         const total = stats.harmless + stats.malicious;
-        return `${stats.malicious}/${total} detections`;
+        return `Virustotal: ${stats.malicious}/${total} detections`;
       }
     } catch (error) {
       console.error('Virustotal Error:', error.message);
-      return 'Service unavailable';
+      return 'Virustotal: Service unavailable';
     }
   },
 
