@@ -2,7 +2,7 @@ const express = require('express');
 const path = require('path');
 const axios = require('axios');
 const rateLimit = require('express-rate-limit');
-const xml2js = require('xml2js'); // Added for parsing XML responses
+const xml2js = require('xml2js'); // For parsing XML responses
 require('dotenv').config();
 
 const app = express();
@@ -25,7 +25,7 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Serve static files
+// Serve static files from the public directory
 app.use(express.static('public'));
 
 // Input Validation
@@ -40,11 +40,11 @@ const validateInput = (input) => {
   return 'unknown';
 };
 
-// Service Configuration (Metadefender added for domain and hash)
+// Service Endpoints Configuration
 const serviceEndpoints = {
-  ip: ['Virustotal', 'AbuseIPDB', 'APIVoid', 'VPNAPI', 'Hybrid-Analysis', 'Metadefender'],
-  domain: ['Virustotal', 'WhoisXML', 'Hybrid-Analysis', 'Metadefender', 'Ismalicious'],
-  hash: ['Virustotal', 'Hybrid-Analysis', 'Metadefender']
+  ip: ['Virustotal', 'AbuseIPDB', 'IPQualityScore', 'APIVoid', 'VPNAPI', 'Hybrid-Analysis', 'Metadefender'],
+  domain: ['Virustotal', 'WhoisXML', 'Hybrid-Analysis', 'Metadefender', 'Ismalicious', 'OTX'],
+  hash: ['Virustotal', 'Hybrid-Analysis', 'Metadefender', 'OTX']
 };
 
 // API Service Handlers
@@ -152,13 +152,12 @@ const apiServices = {
     }
   },
 
-  // Hybrid-Analysis handler updated to support hash and non-hash inputs.
   "Hybrid-Analysis": async (input, type) => {
     try {
       if (type === 'hash') {
-        // Use the overview endpoint for hash lookups
+        // Use the file indicator endpoint for hash lookups
         const response = await axios.get(
-          `https://www.hybrid-analysis.com/api/v2/overview/${input}`,
+          `https://www.hybrid-analysis.com/api/v1/indicators/file/${input}/general`,
           {
             headers: {
               'User-Agent': 'Falcon Sandbox',
@@ -174,9 +173,9 @@ const apiServices = {
         const verdict = response.data.verdict || "unknown";
         return { verdict };
       } else {
-        // For ip and domain, use the search/terms endpoint
+        // For IP and hostname, use the hostname indicator endpoint.
         const response = await axios.get(
-          `https://www.hybrid-analysis.com/api/v2/search/terms?query=${encodeURIComponent(input)}`,
+          `https://www.hybrid-analysis.com/api/v1/indicators/hostname/${input}/general`,
           {
             headers: {
               'User-Agent': 'Falcon Sandbox',
@@ -189,8 +188,8 @@ const apiServices = {
         if (response.status === 404) {
           return { verdict: "not found" };
         }
-        if (response.data && Array.isArray(response.data) && response.data.length > 0) {
-          const verdict = response.data[0].verdict || "unknown";
+        if (response.data && response.data.pulse_info) {
+          const verdict = response.data.verdict || "unknown";
           return { verdict };
         }
         return { verdict: "unknown" };
@@ -201,7 +200,6 @@ const apiServices = {
     }
   },
 
-  // Metadefender handler updated for hash, domain, and IP.
   Metadefender: async (input, type) => {
     try {
       let url;
@@ -236,7 +234,6 @@ const apiServices = {
     }
   },
 
-  // New Ismalicious handler for domain queries.
   Ismalicious: async (input, type) => {
     try {
       if (type !== 'domain') {
@@ -257,6 +254,30 @@ const apiServices = {
       console.error('Ismalicious Error:', error.message);
       return 'Service unavailable';
     }
+  },
+
+  // New OTX handler using v1 endpoints for domain/hostname and file hash
+  OTX: async (input, type) => {
+    try {
+      let url = '';
+      if (type === 'hash') {
+        url = `https://otx.alienvault.com/api/v1/indicators/file/${input}/general`;
+      } else {
+        // For domain/hostname, we'll use the hostname endpoint.
+        url = `https://otx.alienvault.com/api/v1/indicators/hostname/${input}/general`;
+      }
+      const headers = { 'Content-Type': 'application/json' };
+      if (process.env.OTX_KEY) {
+        headers['X-OTX-API-KEY'] = process.env.OTX_KEY;
+      }
+      const response = await axios.get(url, { headers });
+      const pulseCount = response.data?.pulse_info?.count || 0;
+      // Return a string so that it prints properly in the UI
+      return `pulse_info: {"count": ${pulseCount}}`;
+    } catch (error) {
+      console.error('OTX Error:', error.message);
+      return 'Service unavailable';
+    }
   }
 };
 
@@ -268,54 +289,54 @@ app.post('/analyze', async (req, res) => {
     if (!input || typeof input !== 'string') {
       return res.status(400).json({ error: 'Invalid input format' });
     }
-
+    
     const inputType = validateInput(input);
     if (inputType === 'unknown') {
       return res.status(400).json({ error: 'Unsupported input type' });
     }
-
+    
     const results = {};
     const servicesToQuery = serviceEndpoints[inputType];
-
+    
     await Promise.all(servicesToQuery.map(async (service) => {
       results[service] = await apiServices[service](input, inputType);
     }));
-
-    res.json({ 
+    
+    res.json({
       status: 'success',
       inputType,
       results
     });
-
+    
   } catch (error) {
     console.error('Server Error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       status: 'error',
       message: 'Internal server error'
     });
   }
 });
-
+  
 // Health Check Endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'ok',
     timestamp: new Date().toISOString()
   });
 });
-
+  
 // Serve static files from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
-
+  
 // Default route to serve index.html
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
-
+  
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
-
+  
 module.exports = app;
