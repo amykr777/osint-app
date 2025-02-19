@@ -30,7 +30,7 @@ app.use(express.static('public'));
 
 // Input Validation
 const validateInput = (input) => {
-  const ipRegex = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
+  const ipRegex = /^(25[0-5]|2[0-4]\d|[01]?\d\d?)\.(25[0-5]|2[0-4]\d|[01]?\d\d?)\.(25[0-5]|2[0-4]\d|[01]?\d\d?)\.(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
   const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i;
   const hashRegex = /^[a-fA-F0-9]{32,64}$/;
 
@@ -53,40 +53,28 @@ const apiServices = {
     try {
       let url;
       if (type === 'hash') {
-        // For file hashes
         url = `https://www.virustotal.com/api/v3/files/${input}`;
       } else if (type === 'ip') {
-        // For IP addresses
         url = `https://www.virustotal.com/api/v3/ip_addresses/${input}`;
       } else if (type === 'domain') {
-        // For domains
         url = `https://www.virustotal.com/api/v3/domains/${input}`;
       } else {
         return 'Invalid type';
       }
-
       const response = await axios.get(url, {
         headers: { 'x-apikey': process.env.VT_API_KEY },
       });
-
       const stats = response.data.data.attributes.last_analysis_stats;
       if (!stats) return 'No results';
-
-      // Count malicious
       const total = Object.values(stats).reduce((acc, val) => acc + val, 0);
       const malicious = stats.malicious || 0;
-
-      // Distinguish among hash, IP, domain
       if (type === 'hash') {
-        // If it's a file hash, show file name
         const fileName = response.data.data.attributes.meaningful_name || 'UnknownName';
         return `Virustotal: ${malicious}/${total} detections | ${fileName}`;
       } else if (type === 'ip') {
-        // If it's an IP, show ASN
         const asn = response.data.data.attributes.as_owner || 'Unknown ASN';
         return `Virustotal: ${malicious}/${total} detections | ${asn}`;
       } else if (type === 'domain') {
-        // If it's a domain, show registrar
         const registrar = response.data.data.attributes.registrar || 'Unknown Registrar';
         return `Virustotal: ${malicious}/${total} detections | Registrar: ${registrar}`;
       }
@@ -123,12 +111,10 @@ const apiServices = {
 
   WhoisXML: async (input) => {
     try {
-      // Call the Whois service with XML output
       const url = `https://www.whoisxmlapi.com/whoisserver/WhoisService?apiKey=${process.env.WHOISXML_KEY}&domainName=${input}&outputFormat=XML`;
       const response = await axios.get(url);
       const parser = new xml2js.Parser();
       const result = await parser.parseStringPromise(response.data);
-      // Extract createdDate from the parsed XML
       const createdDate = result.WhoisRecord?.createdDate?.[0];
       return `Registered: ${createdDate || 'Unknown'}`;
     } catch (error) {
@@ -171,7 +157,6 @@ const apiServices = {
   "Hybrid-Analysis": async (input, type) => {
     try {
       if (type === 'hash') {
-        // Use the file indicator endpoint for hash lookups
         const response = await axios.get(
           `https://www.hybrid-analysis.com/api/v1/indicators/file/${input}/general`,
           {
@@ -189,7 +174,6 @@ const apiServices = {
         const verdict = response.data.verdict || "unknown";
         return { verdict };
       } else {
-        // For IP and hostname, use the hostname indicator endpoint.
         const response = await axios.get(
           `https://www.hybrid-analysis.com/api/v1/indicators/hostname/${input}/general`,
           {
@@ -272,14 +256,21 @@ const apiServices = {
     }
   },
 
-  // New OTX handler using v1 endpoints for domain/hostname and file hash
+  // Updated AlienVault (OTX) handler:
   AlienVault: async (input, type) => {
     try {
       let url = '';
       if (type === 'hash') {
         url = `https://otx.alienvault.com/api/v1/indicators/file/${input}/general`;
+      } else if (type === 'domain') {
+        // If input contains more than two parts, treat as hostname.
+        if (input.split('.').length > 2) {
+          url = `https://otx.alienvault.com/api/v1/indicators/hostname/${input}/general`;
+        } else {
+          url = `https://otx.alienvault.com/api/v1/indicators/domain/${input}/general`;
+        }
       } else {
-        // For domain/hostname, we'll use the hostname endpoint.
+        // For any other type, default to hostname endpoint.
         url = `https://otx.alienvault.com/api/v1/indicators/hostname/${input}/general`;
       }
       const headers = { 'Content-Type': 'application/json' };
@@ -287,9 +278,9 @@ const apiServices = {
         headers['X-OTX-API-KEY'] = process.env.OTX_KEY;
       }
       const response = await axios.get(url, { headers });
-      const pulseCount = response.data?.pulse_info?.count || 0;
-      // Return a string so that it prints properly in the UI
-      return `pulse_info: {"count": ${pulseCount}}`;
+      // Extract pulse count from the response
+      const pulseCount = response.data?.pulse_info?.count;
+      return `pulse_info: {"count": ${pulseCount !== undefined ? pulseCount : 0}}`;
     } catch (error) {
       console.error('AlienVault Error:', error.message);
       return 'Service unavailable';
@@ -332,7 +323,7 @@ app.post('/analyze', async (req, res) => {
     });
   }
 });
-  
+
 // Health Check Endpoint
 app.get('/health', (req, res) => {
   res.json({
@@ -340,19 +331,19 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
-  
+
 // Serve static files from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
-  
+
 // Default route to serve index.html
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
-  
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
-  
+
 module.exports = app;
