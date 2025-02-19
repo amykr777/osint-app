@@ -43,42 +43,43 @@ const validateInput = (input) => {
 // Service Endpoints Configuration
 const serviceEndpoints = {
   ip: ['Virustotal', 'AbuseIPDB', 'IPQualityScore', 'APIVoid', 'VPNAPI', 'Hybrid-Analysis', 'Metadefender'],
-  domain: ['Virustotal', 'WhoisXML', 'Hybrid-Analysis', 'Metadefender', 'Ismalicious', 'OTX'],
-  hash: ['Virustotal', 'Hybrid-Analysis', 'Metadefender', 'OTX']
+  domain: ['Virustotal', 'WhoisXML', 'Hybrid-Analysis', 'Metadefender', 'Ismalicious', 'AlienVault'],
+  hash: ['Virustotal', 'Hybrid-Analysis', 'Metadefender', 'AlienVault']
 };
 
 // API Service Handlers
 const apiServices = {
   Virustotal: async (input, type) => {
     try {
+      let url;
       if (type === 'hash') {
-        // Query VirusTotal for file hash details
-        const response = await axios.get(
-          `https://www.virustotal.com/api/v3/files/${input}`,
-          { headers: { 'x-apikey': process.env.VT_API_KEY } }
-        );
-
-        const stats = response.data.data.attributes.last_analysis_stats;
-        if (!stats) return 'No results';
-
-        // Total detection count
-        const total = Object.values(stats).reduce((acc, val) => acc + val, 0);
-        // Extract meaningful file name if available
-        const fileName = response.data.data.attributes.meaningful_name || 'UnknownName';
-
-        return `Virustotal: ${stats.malicious}/${total} detections | ${fileName}`;
+        url = `https://www.virustotal.com/api/v3/files/${input}`;
+      } else if (type === 'ip') {
+        url = `https://www.virustotal.com/api/v3/ip_addresses/${input}`;
+      } else if (type === 'domain') {
+        url = `https://www.virustotal.com/api/v3/domains/${input}`;
       } else {
-        // Query VirusTotal for IP/Domain details
-        const response = await axios.get(
-          `https://www.virustotal.com/api/v3/search?query=${encodeURIComponent(input)}`,
-          { headers: { 'x-apikey': process.env.VT_API_KEY } }
-        );
+        return 'Invalid type';
+      }
 
-        const stats = response.data.data[0]?.attributes?.last_analysis_stats;
-        if (!stats) return 'No results';
+      const response = await axios.get(url, {
+        headers: { 'x-apikey': process.env.VT_API_KEY },
+      });
 
-        const total = stats.harmless + stats.malicious;
-        return `Virustotal: ${stats.malicious}/${total} detections`;
+      const stats = response.data.data.attributes.last_analysis_stats;
+      if (!stats) return 'No results';
+
+      const total = Object.values(stats).reduce((acc, val) => acc + val, 0);
+      const malicious = stats.malicious || 0;
+
+      if (type === 'hash') {
+        const fileName = response.data.data.attributes.meaningful_name || 'UnknownName';
+        return `Virustotal: ${malicious}/${total} detections | ${fileName}`;
+      }
+
+      if (type === 'ip' || type === 'domain') {
+        const asn = response.data.data.attributes.as_owner || 'Unknown ASN';
+        return `Virustotal: ${malicious}/${total} detections | ${asn}`;
       }
     } catch (error) {
       console.error('Virustotal Error:', error.message);
@@ -263,7 +264,7 @@ const apiServices = {
   },
 
   // New OTX handler using v1 endpoints for domain/hostname and file hash
-  OTX: async (input, type) => {
+  AlienVault: async (input, type) => {
     try {
       let url = '';
       if (type === 'hash') {
@@ -281,7 +282,7 @@ const apiServices = {
       // Return a string so that it prints properly in the UI
       return `pulse_info: {"count": ${pulseCount}}`;
     } catch (error) {
-      console.error('OTX Error:', error.message);
+      console.error('AlienVault Error:', error.message);
       return 'Service unavailable';
     }
   }
