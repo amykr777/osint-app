@@ -53,10 +53,13 @@ const apiServices = {
     try {
       let url;
       if (type === 'hash') {
+        // For file hashes
         url = `https://www.virustotal.com/api/v3/files/${input}`;
       } else if (type === 'ip') {
+        // For IP addresses
         url = `https://www.virustotal.com/api/v3/ip_addresses/${input}`;
       } else if (type === 'domain') {
+        // For domains
         url = `https://www.virustotal.com/api/v3/domains/${input}`;
       } else {
         return 'Invalid type';
@@ -69,17 +72,23 @@ const apiServices = {
       const stats = response.data.data.attributes.last_analysis_stats;
       if (!stats) return 'No results';
 
+      // Count malicious
       const total = Object.values(stats).reduce((acc, val) => acc + val, 0);
       const malicious = stats.malicious || 0;
 
+      // Distinguish among hash, IP, domain
       if (type === 'hash') {
+        // If it's a file hash, show file name
         const fileName = response.data.data.attributes.meaningful_name || 'UnknownName';
         return `Virustotal: ${malicious}/${total} detections | ${fileName}`;
-      }
-
-      if (type === 'ip' || type === 'domain') {
+      } else if (type === 'ip') {
+        // If it's an IP, show ASN
         const asn = response.data.data.attributes.as_owner || 'Unknown ASN';
         return `Virustotal: ${malicious}/${total} detections | ${asn}`;
+      } else if (type === 'domain') {
+        // If it's a domain, show registrar
+        const registrar = response.data.data.attributes.registrar || 'Unknown Registrar';
+        return `Virustotal: ${malicious}/${total} detections | Registrar: ${registrar}`;
       }
     } catch (error) {
       console.error('Virustotal Error:', error.message);
