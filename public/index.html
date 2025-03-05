@@ -22,6 +22,10 @@
     .toast {
       min-width: 250px;
     }
+    #gif-container {
+      text-align: center;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body class="bg-light">
@@ -35,7 +39,6 @@
 
     <!-- Input Section -->
     <div class="input-group mb-3">
-      <!-- The main input field -->
       <input
         type="text"
         class="form-control"
@@ -43,12 +46,7 @@
         placeholder="Enter IP, Domain, or Hash"
         onkeypress="handleKeyPress(event)"
       >
-      <!-- Analyze Button -->
-      <button
-        class="btn btn-primary"
-        type="button"
-        onclick="analyze()"
-      >
+      <button class="btn btn-primary" type="button" onclick="analyze()">
         <i class="fas fa-search"></i> Analyze
       </button>
     </div>
@@ -63,6 +61,9 @@
 
     <!-- Results Section -->
     <div id="results"></div>
+
+    <!-- Random GIF Section -->
+    <div id="gif-container"></div>
   </div>
 
   <script>
@@ -79,21 +80,19 @@
         alert('Please enter a value');
         return;
       }
-
+      
       showLoading(true);
       clearResults();
-
+      
       try {
         const response = await fetch('/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ input })
         });
-
         if (!response.ok) {
           throw new Error(`Server error: ${response.status}`);
         }
-
         const { inputType, results } = await response.json();
         displayResults(input, inputType, results);
       } catch (error) {
@@ -101,6 +100,8 @@
         showError(error.message);
       } finally {
         showLoading(false);
+        // Fetch a new random GIF each time
+        fetchRandomGif();
       }
     }
 
@@ -112,21 +113,18 @@
             <h5 class="card-title">OSINT Results for: ${input}</h5>
             <h6 class="card-subtitle mb-2 text-muted">Type: ${inputType.toUpperCase()}</h6>
             ${Object.entries(results).map(([service, info]) => {
-              // Replace "Service unavailable" with "No results found" for Virustotal & Metadefender
               if (
                 (service === 'Virustotal' || service === 'Metadefender') &&
                 info === 'Service unavailable'
               ) {
                 info = 'No results found';
               }
-
               let displayInfo = info;
               if (typeof info === 'object' && info !== null) {
                 displayInfo = Object.entries(info)
                   .map(([key, value]) => `"${key}": ${value}`)
                   .join(', ');
               }
-
               return `
                 <div class="result-item mb-2 p-2 border rounded" onclick="copyResult('${service}: ${displayInfo}')">
                   <strong>${service}:</strong> ${displayInfo}
@@ -171,21 +169,22 @@
         </div>`;
     }
 
-    function showToast(message) {
-      const toast = document.createElement('div');
-      toast.className = 'toast align-items-center text-white bg-success border-0 position-fixed bottom-0 end-0 m-3';
-      toast.setAttribute('role', 'alert');
-      toast.setAttribute('aria-live', 'assertive');
-      toast.setAttribute('aria-atomic', 'true');
-      toast.innerHTML = `
-        <div class="d-flex">
-          <div class="toast-body">${message}</div>
-          <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-        </div>`;
-
-      document.body.appendChild(toast);
-      new bootstrap.Toast(toast).show();
-      setTimeout(() => toast.remove(), 3000);
+    async function fetchRandomGif() {
+      try {
+        // Use Tenor's random endpoint with a query parameter and a timestamp for cache-busting.
+        const url = `https://api.tenor.com/v1/random?key=LIVDSRZULELA&q=random&limit=1&pos=${Date.now()}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data && data.results && data.results.length > 0) {
+          const gifUrl = data.results[0].media[0].gif.url;
+          document.getElementById('gif-container').innerHTML = `<img src="${gifUrl}" alt="Random GIF" class="img-fluid">`;
+        } else {
+          document.getElementById('gif-container').innerHTML = '';
+        }
+      } catch (error) {
+        console.error('Error fetching random gif:', error);
+        document.getElementById('gif-container').innerHTML = '';
+      }
     }
   </script>
 
