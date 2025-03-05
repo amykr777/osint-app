@@ -25,29 +25,62 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Serve static files from the public directory
+// Serve static files from the 'public' directory
 app.use(express.static('public'));
 
-// Input Validation
-const validateInput = (input) => {
-  const ipRegex = /^(25[0-5]|2[0-4]\d|[01]?\d\d?)\.(25[0-5]|2[0-4]\d|[01]?\d\d?)\.(25[0-5]|2[0-4]\d|[01]?\d\d?)\.(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
-  const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i;
-  const hashRegex = /^[a-fA-F0-9]{32,64}$/;
+/* ---------------------------
+   Input Validation
+---------------------------- */
 
+// IPv4 + IPv6
+const ipv4Regex = /^(25[0-5]|2[0-4]\d|[01]?\d\d?)\.(25[0-5]|2[0-4]\d|[01]?\d\d?)\.(25[0-5]|2[0-4]\d|[01]?\d\d?)\.(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
+const ipv6Regex = /^(([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(([0-9A-Fa-f]{1,4}:){1,7}:)|(([0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4})|(([0-9A-Fa-f]{1,4}:){1,5}(:[0-9A-Fa-f]{1,4}){1,2})|(([0-9A-Fa-f]{1,4}:){1,4}(:[0-9A-Fa-f]{1,4}){1,3})|(([0-9A-Fa-f]{1,4}:){1,3}(:[0-9A-Fa-f]{1,4}){1,4})|(([0-9A-Fa-f]{1,4}:){1,2}(:[0-9A-Fa-f]{1,4}){1,5})|([0-9A-Fa-f]{1,4}:)((:[0-9A-Fa-f]{1,4}){1,6})|(:)((:[0-9A-Fa-f]{1,4}){1,7}|:))$/i;
+const ipRegex = new RegExp(`(${ipv4Regex.source})|(${ipv6Regex.source})`, 'i');
+
+const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i;
+const hashRegex = /^[a-fA-F0-9]{32,64}$/;
+
+function validateInput(input) {
   if (ipRegex.test(input)) return 'ip';
   if (domainRegex.test(input)) return 'domain';
   if (hashRegex.test(input)) return 'hash';
   return 'unknown';
-};
+}
 
-// Service Endpoints Configuration
+/* ---------------------------
+   Service Configuration
+---------------------------- */
+
 const serviceEndpoints = {
-  ip: ['Virustotal', 'AbuseIPDB', 'IPQualityScore', 'APIVoid', 'VPNAPI', 'Hybrid-Analysis', 'Metadefender'],
-  domain: ['Virustotal', 'WhoisXML', 'Hybrid-Analysis', 'Metadefender', 'Ismalicious', 'AlienVault'],
-  hash: ['Virustotal', 'Hybrid-Analysis', 'Metadefender', 'AlienVault']
+  ip: [
+    'Virustotal',
+    'AbuseIPDB',
+    'IPQualityScore',
+    'APIVoid',
+    'VPNAPI',
+    'Hybrid-Analysis',
+    'Metadefender'
+  ],
+  domain: [
+    'Virustotal',
+    'WhoisXML',
+    'Hybrid-Analysis',
+    'Metadefender',
+    'Ismalicious',
+    'AlienVault'
+  ],
+  hash: [
+    'Virustotal',
+    'Hybrid-Analysis',
+    'Metadefender',
+    'AlienVault'
+  ]
 };
 
-// API Service Handlers
+/* ---------------------------
+   API Service Handlers
+---------------------------- */
+
 const apiServices = {
   Virustotal: async (input, type) => {
     try {
@@ -61,13 +94,17 @@ const apiServices = {
       } else {
         return 'Invalid type';
       }
+
       const response = await axios.get(url, {
         headers: { 'x-apikey': process.env.VT_API_KEY },
       });
+
       const stats = response.data.data.attributes.last_analysis_stats;
       if (!stats) return 'No results';
+
       const total = Object.values(stats).reduce((acc, val) => acc + val, 0);
       const malicious = stats.malicious || 0;
+
       if (type === 'hash') {
         const fileName = response.data.data.attributes.meaningful_name || 'UnknownName';
         return `Virustotal: ${malicious}/${total} detections | ${fileName}`;
@@ -80,7 +117,8 @@ const apiServices = {
       }
     } catch (error) {
       console.error('Virustotal Error:', error.message);
-      return 'Virustotal: Service unavailable';
+      // Return just "Service unavailable" so front end can parse
+      return 'Service unavailable';
     }
   },
 
@@ -230,6 +268,7 @@ const apiServices = {
       }
     } catch (error) {
       console.error('Metadefender Error:', error.message);
+      // Return just "Service unavailable" so front end can parse
       return 'Service unavailable';
     }
   },
@@ -256,21 +295,20 @@ const apiServices = {
     }
   },
 
-  // Updated AlienVault (OTX) handler:
   AlienVault: async (input, type) => {
     try {
       let url = '';
       if (type === 'hash') {
         url = `https://otx.alienvault.com/api/v1/indicators/file/${input}/general`;
       } else if (type === 'domain') {
-        // If input contains more than two parts, treat as hostname.
+        // If domain has more than two parts, treat as subdomain
         if (input.split('.').length > 2) {
           url = `https://otx.alienvault.com/api/v1/indicators/hostname/${input}/general`;
         } else {
           url = `https://otx.alienvault.com/api/v1/indicators/domain/${input}/general`;
         }
       } else {
-        // For any other type, default to hostname endpoint.
+        // default to hostname
         url = `https://otx.alienvault.com/api/v1/indicators/hostname/${input}/general`;
       }
       const headers = { 'Content-Type': 'application/json' };
@@ -278,7 +316,6 @@ const apiServices = {
         headers['X-OTX-API-KEY'] = process.env.OTX_KEY;
       }
       const response = await axios.get(url, { headers });
-      // Extract pulse count from the response
       const pulseCount = response.data?.pulse_info?.count;
       return `pulse_info: {"count": ${pulseCount !== undefined ? pulseCount : 0}}`;
     } catch (error) {
@@ -288,7 +325,9 @@ const apiServices = {
   }
 };
 
-// Main Analysis Endpoint
+/* ---------------------------
+   Main Analysis Endpoint
+---------------------------- */
 app.post('/analyze', async (req, res) => {
   try {
     const { input } = req.body;
@@ -301,20 +340,20 @@ app.post('/analyze', async (req, res) => {
     if (inputType === 'unknown') {
       return res.status(400).json({ error: 'Unsupported input type' });
     }
-    
+
     const results = {};
     const servicesToQuery = serviceEndpoints[inputType];
-    
+
     await Promise.all(servicesToQuery.map(async (service) => {
       results[service] = await apiServices[service](input, inputType);
     }));
-    
+
     res.json({
       status: 'success',
       inputType,
       results
     });
-    
+
   } catch (error) {
     console.error('Server Error:', error);
     res.status(500).json({
@@ -332,14 +371,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Serve static files from the 'public' directory
-app.use(express.static(path.join(__dirname, 'public')));
-
 // Default route to serve index.html
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

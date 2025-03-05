@@ -24,13 +24,18 @@
     }
   </style>
 </head>
-<body>
-  <div class="container py-5">
-    <h1 class="text-center mb-1"><i class="fas fa-shield-alt"></i> OSINT App v2.69</h1>
-    <p class="text-center text-muted mb-4" style="font-size: 0.9rem;">* Refresh the webpage once every morning (I might have fixed something or added something new)</p>
-    
+<body class="bg-light">
+  <div class="container py-4">
+    <h1 class="text-center mb-1">
+      <i class="fas fa-shield-alt"></i> OSINT App v2.69
+    </h1>
+    <p class="text-center text-muted" style="font-size: 0.9rem;">
+      * Refresh the webpage once every morning (I might have fixed something or added something new)
+    </p>
+
     <!-- Input Section -->
     <div class="input-group mb-3">
+      <!-- The main input field -->
       <input
         type="text"
         class="form-control"
@@ -38,7 +43,12 @@
         placeholder="Enter IP, Domain, or Hash"
         onkeypress="handleKeyPress(event)"
       >
-      <button class="btn btn-primary" onclick="analyze()">
+      <!-- Analyze Button -->
+      <button
+        class="btn btn-primary"
+        type="button"
+        onclick="analyze()"
+      >
         <i class="fas fa-search"></i> Analyze
       </button>
     </div>
@@ -56,7 +66,7 @@
   </div>
 
   <script>
-    // Listen for Enter key
+    // Trigger analyze() when the Enter key is pressed
     function handleKeyPress(e) {
       if (e.key === 'Enter') {
         analyze();
@@ -65,11 +75,14 @@
 
     async function analyze() {
       const input = document.getElementById('inputString').value.trim();
-      if (!input) return alert('Please enter a value');
-      
+      if (!input) {
+        alert('Please enter a value');
+        return;
+      }
+
       showLoading(true);
       clearResults();
-      
+
       try {
         const response = await fetch('/analyze', {
           method: 'POST',
@@ -99,15 +112,26 @@
             <h5 class="card-title">OSINT Results for: ${input}</h5>
             <h6 class="card-subtitle mb-2 text-muted">Type: ${inputType.toUpperCase()}</h6>
             ${Object.entries(results).map(([service, info]) => {
+              // Replace "Service unavailable" with "No results found" for Virustotal & Metadefender
+              if (
+                (service === 'Virustotal' || service === 'Metadefender') &&
+                info === 'Service unavailable'
+              ) {
+                info = 'No results found';
+              }
+
               let displayInfo = info;
               if (typeof info === 'object' && info !== null) {
                 displayInfo = Object.entries(info)
                   .map(([key, value]) => `"${key}": ${value}`)
                   .join(', ');
               }
-              return `<div class="result-item mb-2 p-2 border rounded" onclick="copyResult('${service}: ${displayInfo}')">
-                        <strong>${service}:</strong> ${displayInfo}
-                      </div>`;
+
+              return `
+                <div class="result-item mb-2 p-2 border rounded" onclick="copyResult('${service}: ${displayInfo}')">
+                  <strong>${service}:</strong> ${displayInfo}
+                </div>
+              `;
             }).join('')}
           </div>
         </div>
@@ -158,7 +182,7 @@
           <div class="toast-body">${message}</div>
           <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
         </div>`;
-      
+
       document.body.appendChild(toast);
       new bootstrap.Toast(toast).show();
       setTimeout(() => toast.remove(), 3000);
