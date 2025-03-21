@@ -411,6 +411,11 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Explicit route for /bulk.html
+app.get('/bulk.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'bulk.html'));
+});
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
