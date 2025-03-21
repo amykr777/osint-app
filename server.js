@@ -325,6 +325,41 @@ const apiServices = {
   }
 };
 
+// Bulk Scan Single Endpoint for Virustotal
+app.post('/bulk-scan-single', async (req, res) => {
+  try {
+    const { ip } = req.body;
+    if (!ip) {
+      return res.status(400).json({ status: 'error', message: 'No IP provided' });
+    }
+    // Optional: Validate IP using your ipRegex
+    if (!ipRegex.test(ip)) {
+      return res.status(400).json({ status: 'error', message: 'Invalid IP address' });
+    }
+    // Make a request using the VT_BULK_API_KEY
+    const response = await axios.get(
+      `https://www.virustotal.com/api/v3/ip_addresses/${ip}`,
+      {
+        headers: { 'x-apikey': process.env.VT_BULK_API_KEY }
+      }
+    );
+    const attributes = response.data.data.attributes;
+    const stats = attributes.last_analysis_stats;
+    const malicious = stats ? (stats.malicious || 0) : 0;
+    // Create a result object with the desired fields.
+    const result = {
+      ip,
+      maliciousScore: malicious,
+      country: attributes.country || 'Unknown',
+      asn: attributes.as_owner || 'Unknown'
+    };
+    res.json({ status: 'success', result });
+  } catch (error) {
+    console.error('Bulk scan error:', error.message);
+    res.json({ status: 'error', message: 'Service unavailable' });
+  }
+});
+
 /* ---------------------------
    Main Analysis Endpoint
 ---------------------------- */

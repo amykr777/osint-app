@@ -26,9 +26,22 @@
       text-align: center;
       margin-top: 20px;
     }
+    /* Positioning the bulk scanner button at top right */
+    .bulk-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+    }
   </style>
 </head>
 <body class="bg-light">
+  <!-- Bulk Scanner Button on top right -->
+  <div class="bulk-btn">
+    <a href="bulk.html" class="btn btn-secondary">
+      <i class="fas fa-th-large"></i> Bulk Scanner
+    </a>
+  </div>
+
   <div class="container py-4">
     <h1 class="text-center mb-1">
       <i class="fas fa-shield-alt"></i> OSINT App v2.69
