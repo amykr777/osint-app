@@ -359,6 +359,151 @@ app.post('/bulk-scan-single', async (req, res) => {
     res.json({ status: 'error', message: 'Service unavailable' });
   }
 });
+/* ---------------------------
+   Assign Tasks Feature
+---------------------------- */
+
+// -- In-memory "database"
+let TASK_USERS = ['Aman Kumar', 'Aditya Udgaonkar', 'Ajinkya Kadam', 'Akshat Jain', 'Akshay Khade', 'Anant Jain', 'Devyani Itware', 'Dnyanaraj Desai', 'Mayank Attri', 'Prateek Aujkar'];
+let TASK_LIST = [
+  "Call log audit",
+  "Customer response",
+  "Unassigned queue",
+  "Informationals",
+  "Phone",
+  "Trinity Phishing mailbox",
+  "Hyatt EoG",
+  "Failed ARPs",
+  "St. Jude"
+];
+let TASK_PROD = {
+  "Call log audit":30,
+  "Customer response":60,
+  "Unassigned queue":40,
+  "Informationals":20,
+  "Phone":30,
+  "Trinity Phishing mailbox":60,
+  "Hyatt EoG":25,
+  "Failed ARPs":5,
+  "St. Jude":25
+};
+let TASK_PRESENCE = Object.fromEntries(TASK_USERS.map(u=>[u,true]));
+
+// GET endpoints
+app.get('/api/task-users', (req, res) => res.json(TASK_USERS));
+app.get('/api/task-list', (req, res) => res.json(TASK_LIST));
+app.get('/api/task-prod-times', (req, res) => res.json(TASK_PROD));
+app.get('/api/task-presence', (req, res) => res.json(TASK_PRESENCE));
+
+// POST for updating
+app.post('/api/task-users', (req, res) => {
+  if(!req.body.users) return res.status(400).json({error:'Missing user list'});
+  TASK_USERS = req.body.users;
+  TASK_PRESENCE = Object.fromEntries(TASK_USERS.map(u=>[u,true]));
+  res.json({ok:true});
+});
+app.post('/api/task-list', (req, res) => {
+  if(!req.body.tasks) return res.status(400).json({error:'Missing task list'});
+  TASK_LIST = req.body.tasks;
+  res.json({ok:true});
+});
+app.post('/api/task-prod-times', (req, res) => {
+  TASK_PROD = req.body;
+  res.json({ok:true});
+});
+app.post('/api/task-presence', (req, res) => {
+  TASK_PRESENCE = req.body;
+  res.json({ok:true});
+});
+
+// --- Robust Task Assignment Logic ---
+function shuffle(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+app.post('/api/assign-tasks', (req, res) => {
+  const present = Array.isArray(req.body.present)
+    ? req.body.present.filter(u => TASK_USERS.includes(u))
+    : Object.keys(TASK_PRESENCE).filter(u => TASK_PRESENCE[u]);
+  if (!present.length) return res.json({});
+
+  // Productivity tracking map for balanced assignment (not counting ARP)
+  let prodTime = Object.fromEntries(present.map(u => [u, 0]));
+  let assignments = Object.fromEntries(present.map(u => [u, []]));
+  let taskToUsers = {};
+
+  // Define constraints
+  const caps = {
+    "Call log audit": 3,
+    "Customer response": 3,
+    "Unassigned queue": 3,
+    "Informationals": 3,
+    "Phone": 3,
+    "Trinity Phishing mailbox": 1,
+    "Hyatt EoG": 1,
+    "St. Jude": 1,
+    "Failed ARPs": 2,
+  };
+
+  // --- Step 1: Assign single-assignee (unique) tasks ---
+  let alreadyPicked = new Set();
+  ["Trinity Phishing mailbox", "Hyatt EoG", "St. Jude"].forEach(task => {
+    let eligible = present.filter(u => !alreadyPicked.has(u));
+    if (!eligible.length) eligible = present; // fallback if all are picked
+    let chosen = shuffle([...eligible])[0];
+    if (chosen) {
+      assignments[chosen].push({task, prod:TASK_PROD[task]});
+      prodTime[chosen] += TASK_PROD[task];
+      taskToUsers[task] = [chosen];
+      alreadyPicked.add(chosen);
+    } else {
+      taskToUsers[task] = [];
+    }
+  });
+
+  // --- Step 2: Assign Call log audit & Phone simultaneously (same up to 3 users) ---
+  let callLogUsers = shuffle([...present]).slice(0, Math.min(caps["Call log audit"], present.length));
+  callLogUsers.forEach(u => {
+    assignments[u].push({task:"Call log audit", prod:TASK_PROD["Call log audit"]});
+    assignments[u].push({task:"Phone", prod:TASK_PROD["Phone"]});
+    prodTime[u] += TASK_PROD["Call log audit"] + TASK_PROD["Phone"];
+  });
+  taskToUsers["Call log audit"] = [...callLogUsers];
+  taskToUsers["Phone"] = [...callLogUsers];
+
+  // --- Step 3: Assign remaining 3-user tasks, balance prod time, allow >3 tasks as needed ---
+  ["Customer response", "Unassigned queue", "Informationals"].forEach(task => {
+    let pickN = Math.min(caps[task], present.length);
+    // Sort users by least workload first, shuffle to break ties
+    let sorted = shuffle([...present]);
+    sorted.sort((a, b) => prodTime[a] - prodTime[b]);
+    let picked = sorted.slice(0, pickN);
+    picked.forEach(u => {
+      assignments[u].push({task, prod:TASK_PROD[task]});
+      prodTime[u] += TASK_PROD[task];
+    });
+    taskToUsers[task] = picked;
+  });
+
+  // --- Step 4: Assign Failed ARPs: 2 users with least total prod time (ARP time not counted) ---
+  let arpSorted = shuffle([...present]);
+  arpSorted.sort((a, b) => prodTime[a] - prodTime[b]);
+  let arpPicked = arpSorted.slice(0, Math.min(caps["Failed ARPs"], present.length));
+  arpPicked.forEach(u => assignments[u].push({task:"Failed ARPs", prod:0}));
+  taskToUsers["Failed ARPs"] = arpPicked;
+
+  // Ensure all tasks always appear in table output, even if empty
+  TASK_LIST.forEach(task => {
+    if (!taskToUsers[task]) taskToUsers[task] = [];
+  });
+
+  // Output: user --> their task list, as frontend expects
+  res.json(assignments);
+});
 
 /* ---------------------------
    Main Analysis Endpoint
@@ -414,6 +559,11 @@ app.get('/', (req, res) => {
 // Explicit route for /bulk.html
 app.get('/bulk.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'bulk.html'));
+});
+
+// Explicit route for /assign-tasks.html
+app.get('/assign-tasks.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'assign-tasks.html'));
 });
 
 // Start server
