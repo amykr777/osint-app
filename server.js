@@ -364,7 +364,7 @@ app.post('/bulk-scan-single', async (req, res) => {
 ---------------------------- */
 
 // -- In-memory "database"
-let TASK_USERS = ['Aman Kumar', 'Aditya Udgaonkar', 'Ajinkya Kadam', 'Akshat Jain', 'Akshay Khade', 'Anant Jain', 'Devyani Itware', 'Dnyanaraj Desai', 'Mayank Attri', 'Prateek Aujkar'];
+let TASK_USERS = ['Aman Kumar', 'Abhishek Sabarinath', 'Aditya Udgaonkar', 'Ajinkya Kadam', 'Akshat Jain', 'Akshay Khade', 'Anant Jain', 'Animesh Rai', 'Devyani Itware', 'Binu Sharma', 'Dnyanaraj Desai', 'Mayank Attri', 'Prateek Aujkar', 'Savali Varne', 'Shivsai Peddinti', 'Shounak Das', 'Shreyansh Swami', 'Shreyas Lolage', 'Swapneel Khandagale', 'Tavish Negi', 'Vishal Vasava'];
 let TASK_LIST = [
   "Call log audit",
   "Customer response",
@@ -438,14 +438,14 @@ app.post('/api/assign-tasks', (req, res) => {
 
   // Define constraints
   const caps = {
-    "Call log audit": 3,
-    "Customer response": 3,
-    "Unassigned queue": 3,
-    "Informationals": 3,
-    "Phone": 3,
-    "Trinity Phishing mailbox": 1,
-    "Hyatt EoG": 1,
-    "St. Jude": 1,
+    "Call log audit": 5,
+    "Customer response": 5,
+    "Unassigned queue": 5,
+    "Informationals": 5,
+    "Phone": 5,
+    "Trinity Phishing mailbox": 2,
+    "Hyatt EoG": 2,
+    "St. Jude": 2,
     "Failed ARPs": 2,
   };
 
